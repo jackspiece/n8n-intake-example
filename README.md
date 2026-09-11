@@ -1,55 +1,69 @@
-# n8n intake example
+# n8n Intake
 
-A small intake workflow that sorts incoming records into ready, review and duplicate queues. Every input stays in the output, with the original values and a record of any changes.
+An importable workflow that sorts records into **ready**, **review** and **duplicate** outputs while retaining the original values and reconciling the totals.
+
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/overview-mobile.png">
+  <img src="docs/assets/overview.png" alt="Seven-node n8n workflow: run the example, load eight fictional records, validate and classify, then produce three ready records, four review records, one duplicate and a reconciliation count." width="1280">
+</picture>
+
+**[Get the workflow JSON](workflow.json)** · **[Quick start](#quick-start)** · [Rules and data](docs/rules.md) · [Verification](docs/verification.md)
 
 [![Verify intake workflow](https://github.com/jackspiece/n8n-intake-example/actions/workflows/check.yml/badge.svg)](https://github.com/jackspiece/n8n-intake-example/actions/workflows/check.yml)
 
-This is an independent example built with fictional data. It is not a client case study and does not send mail or write to a CRM.
+Independent example · Fictional data · No credentials required · Verified with n8n 2.38.7
 
-The eight sample records should produce three ready records, four for review and one duplicate. The two conflicting versions of ID `002` both go to review. The workflow does not pick a winner.
+## Quick start
 
-```mermaid
-flowchart LR
-    A[Run example] --> B[8 fictional records]
-    B --> C[Validate and classify]
-    C --> D[Ready: 3]
-    C --> E[Review: 4]
-    C --> F[Duplicate log: 1]
-    C --> G[Reconcile: 8 in, 8 out]
-```
+1. Open [workflow.json](workflow.json) and download the raw file.
+2. Import it into a new n8n workflow.
+3. Click **Execute workflow** and open the output nodes.
 
-## Try it in n8n
+The example uses a Manual Trigger and Code nodes. It runs without connecting an inbox, CRM or other external service.
 
-Import [workflow.json](workflow.json) into a new workflow and click **Execute workflow**. The example uses the Manual Trigger and Code nodes. It needs no credentials.
+## What the example produces
 
-Open each queue to inspect its records. Each result includes `original`, `normalized`, `changes` and `reasons`. The **Count and reconcile** node shows the totals.
+| Output | Records | What it shows |
+| --- | ---: | --- |
+| **Ready queue** | 3 | Records that pass the example's checks. |
+| **Review queue** | 4 | Incomplete, malformed or conflicting records. |
+| **Duplicate log** | 1 | A repeated record with the same normalized fields. |
+| **Count and reconcile** | 8 accounted for | Three ready + four review + one duplicate. |
 
-The example targets n8n **2.38.7**. For a real intake, replace the fictional input node with the agreed data source and field mapping. The queues are deliberately the final outputs here; connect a destination only after the review and duplicate rules have been agreed.
+Both versions of ID `002` go to review because their fields differ.
 
-## Rules in this example
+Each classified result includes **`original`**, **`normalized`**, **`changes`** and **`reasons`**. Open a queue to see the values and the decision.
 
-- IDs, names and email addresses must be text. Leading zeroes stay intact.
-- Surrounding whitespace is trimmed. Only the domain of an email address is lowercased.
-- Email checks cover basic format, not ownership or deliverability.
-- A repeated ID with the same normalized fields is recorded as a duplicate.
-- A repeated ID with different fields sends the whole group to review.
-- Unknown fields and malformed inputs are preserved for review.
-- These duplicate checks cover one run. A live system would also need a persistent check against records already imported.
+## How it works
 
-## Local checks
+IDs stay text. Surrounding whitespace is trimmed, and only the domain of an email address is lowercased. Basic email formatting is checked; ownership and deliverability are outside the example.
 
-The classification tests use Node 24's built-in test runner and need no packages:
+Matching IDs with identical normalized fields produce a duplicate record. Conflicting versions send the whole group to review. Unknown fields and malformed inputs are preserved for review.
+
+**Duplicate checks cover one run.** A live import would also need a persistent check against existing records. Read [the full rules and adaptation notes](docs/rules.md) before connecting a real source.
+
+## Work on it locally
+
+The classifier tests use Node.js 24's built-in runner and need no packages:
 
 ```sh
+git clone https://github.com/jackspiece/n8n-intake-example.git
+cd n8n-intake-example
 npm test
 ```
 
-`npm run build` regenerates the n8n export from the same classifier and example records.
+`npm run build` regenerates the export from the same classifier and fictional records. The [verification guide](docs/verification.md) explains the separate checks for the classifier and the actual seven-node n8n execution.
 
-The linked GitHub check also installs n8n 2.38.7, imports the actual export into a temporary database and runs it. It checks all seven nodes, the three queues, the retained original records and the final counts. Its status is shown by the badge above; the execution output is in the job log.
+## Project map
 
-## Project enquiries
+| File | Purpose |
+| --- | --- |
+| [workflow.json](workflow.json) | The importable n8n workflow. |
+| [classify.cjs](classify.cjs) | Classification and normalization rules. |
+| [example-records.json](example-records.json) | The eight fictional inputs. |
+| [build-workflow.cjs](build-workflow.cjs) | Generate the export from the source files. |
+| [check-execution.cjs](check-execution.cjs) | Check the actual n8n execution output. |
 
-For a small automation or data-cleanup project, open an issue with a short description and a redacted example. Please keep private customer information out of public issues. Scope, price and payment are agreed before client work starts.
+---
 
-By jackspiece. Code licensed under MIT.
+By [jackspiece](https://github.com/jackspiece), under the [MIT License](LICENSE). For a small automation project, [open an enquiry](https://github.com/jackspiece/n8n-intake-example/issues/new) with a redacted example. Scope, price and funding are agreed before client work starts. Keep private customer details out of public issues.
