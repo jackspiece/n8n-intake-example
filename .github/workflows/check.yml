@@ -1,0 +1,44 @@
+name: Verify intake workflow
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      N8N_USER_FOLDER: ${{ runner.temp }}/intake-n8n-user
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_TEMPLATES_ENABLED: "false"
+      N8N_LOG_LEVEL: error
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24.18.0"
+          package-manager-cache: false
+      - name: Check classification rules
+        run: npm test
+      - name: Check the generated export
+        run: |
+          node build-workflow.cjs
+          git diff --exit-code -- workflow.json
+      - name: Install n8n
+        run: npm install --prefix "$RUNNER_TEMP/intake-n8n" --no-audit --no-fund n8n@2.38.7
+      - name: Import and execute the workflow
+        run: |
+          "$RUNNER_TEMP/intake-n8n/node_modules/.bin/n8n" import:workflow --input=workflow.json
+          "$RUNNER_TEMP/intake-n8n/node_modules/.bin/n8n" execute --id=IntakeDemo260911 --rawOutput > execution.log 2>&1
+          node check-execution.cjs execution.log
+      - name: Show execution diagnostics
+        if: always()
+        run: |
+          if test -f execution.log; then
+            cat execution.log
+          fi

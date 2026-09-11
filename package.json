@@ -1,0 +1,11 @@
+{
+  "name": "n8n-intake-example",
+  "version": "1.0.0",
+  "private": true,
+  "description": "An independent n8n intake example using fictional records",
+  "scripts": {
+    "build": "node build-workflow.cjs",
+    "test": "node --test test/*.test.cjs"
+  },
+  "license": "MIT"
+}

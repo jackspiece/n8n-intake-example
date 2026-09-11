@@ -1,0 +1,157 @@
+{
+  "id": "IntakeDemo260911",
+  "name": "Intake example: preserve, check, route",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "start",
+      "name": "Run example",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const records = [\n  {\n    \"external_id\": \"001\",\n    \"full_name\": \" Maya Chen \",\n    \"email\": \"maya@example.test\",\n    \"company\": \"Northside\"\n  },\n  {\n    \"external_id\": \"002\",\n    \"full_name\": \"Sam\",\n    \"email\": \"Sam@example.test\",\n    \"company\": \"Acorn\"\n  },\n  {\n    \"external_id\": \"001\",\n    \"full_name\": \"Maya Chen\",\n    \"email\": \"maya@example.test\",\n    \"company\": \"Northside\"\n  },\n  {\n    \"external_id\": \"003\",\n    \"full_name\": \"Ira\",\n    \"email\": \"\",\n    \"company\": \"\"\n  },\n  {\n    \"external_id\": \"004\",\n    \"full_name\": \"Li\",\n    \"email\": \"li@@example.test\",\n    \"company\": \"\"\n  },\n  {\n    \"external_id\": \"005\",\n    \"full_name\": \"Sara\",\n    \"email\": \"sara@EXAMPLE.TEST\",\n    \"company\": \"\"\n  },\n  {\n    \"external_id\": \"002\",\n    \"full_name\": \"Sam\",\n    \"email\": \"Sam.New@example.test\",\n    \"company\": \"Acorn\"\n  },\n  {\n    \"external_id\": \"007\",\n    \"full_name\": \"Jo\",\n    \"email\": \"Jo@example.test\",\n    \"company\": \"\"\n  }\n];\nreturn records.map(json => ({ json }));"
+      },
+      "id": "example",
+      "name": "Fictional intake records",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "function classifyRecords(records) {\n  const fields = [\"external_id\", \"full_name\", \"email\", \"company\"];\n  const required = new Set([\"external_id\", \"full_name\", \"email\"]);\n  const rows = records.map((original, index) => {\n    const reasons = [];\n    const normalized = {};\n    const changes = [];\n    const source = original && typeof original === \"object\" && !Array.isArray(original)\n      ? original : {};\n    if (source !== original) reasons.push(\"record_is_not_an_object\");\n\n    for (const field of fields) {\n      const raw = source[field];\n      if (raw === undefined && !required.has(field)) {\n        normalized[field] = \"\";\n        continue;\n      }\n      if (typeof raw !== \"string\") {\n        reasons.push(raw === undefined ? \"missing_\" + field : \"non_text_\" + field);\n        normalized[field] = null;\n        continue;\n      }\n      let value = raw.trim();\n      if (field === \"email\" && /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(value)) {\n        const at = value.indexOf(\"@\");\n        // Domain names are case insensitive. Preserve the local part.\n        value = value.slice(0, at + 1) + value.slice(at + 1).toLowerCase();\n      }\n      normalized[field] = value;\n      if (value !== raw) changes.push({ field, before: raw, after: value });\n      if (!value && required.has(field)) reasons.push(\"missing_\" + field);\n    }\n    if (normalized.email && !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(normalized.email)) {\n      reasons.push(\"email_format_needs_review\");\n    }\n    const extraFields = Object.keys(source).filter(field => !fields.includes(field));\n    if (extraFields.length) reasons.push(\"unmapped_fields\");\n    return {\n      source_row: index + 1,\n      original,\n      normalized,\n      changes,\n      reasons,\n      ...(extraFields.length ? { unmapped_fields: extraFields } : {}),\n    };\n  });\n\n  const byId = new Map();\n  for (const row of rows) {\n    const id = row.normalized.external_id;\n    if (!id) continue;\n    const group = byId.get(id) || [];\n    group.push(row);\n    byId.set(id, group);\n  }\n\n  // Quarantine the whole group if one ID refers to different records.\n  // Keeping the first one would silently choose which version is correct.\n  for (const group of byId.values()) {\n    if (group.length < 2) continue;\n    const variants = new Set(group.map(row => JSON.stringify(row.normalized)));\n    if (variants.size > 1 || group.some(row => row.reasons.length)) {\n      for (const row of group) row.reasons.push(\"conflicting_id\");\n    }\n  }\n\n  const firstReady = new Map();\n  for (const row of rows) {\n    if (row.reasons.length) {\n      row.status = \"review\";\n    } else if (firstReady.has(row.normalized.external_id)) {\n      row.status = \"duplicate\";\n      row.duplicate_of_row = firstReady.get(row.normalized.external_id);\n    } else {\n      row.status = \"ready\";\n      firstReady.set(row.normalized.external_id, row.source_row);\n    }\n  }\n  return rows;\n}\n\nreturn classifyRecords($input.all().map(item => item.json))\n  .map((json, index) => ({ json, pairedItem: { item: index } }));"
+      },
+      "id": "classify",
+      "name": "Validate and classify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $input.all().filter(item => item.json.status === \"ready\");"
+      },
+      "id": "ready",
+      "name": "Ready queue",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $input.all().filter(item => item.json.status === \"review\");"
+      },
+      "id": "review",
+      "name": "Review queue",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $input.all().filter(item => item.json.status === \"duplicate\");"
+      },
+      "id": "duplicates",
+      "name": "Duplicate log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const rows = $input.all().map(item => item.json);\nconst ready = rows.filter(row => row.status === \"ready\");\nconst review = rows.filter(row => row.status === \"review\");\nconst duplicate = rows.filter(row => row.status === \"duplicate\");\nconst outputCount = ready.length + review.length + duplicate.length;\nif (outputCount !== rows.length) throw new Error(\"An input has no recognized queue\");\nreturn [{ json: {\n  input_count: rows.length, output_count: outputCount,\n  ready_count: ready.length, review_count: review.length, duplicate_count: duplicate.length,\n  ready_ids: ready.map(row => row.normalized.external_id),\n  review_rows: review.map(row => row.source_row),\n  duplicate_pairs: duplicate.map(row => ({ source_row: row.source_row, duplicate_of_row: row.duplicate_of_row })),\n  all_inputs_accounted_for: outputCount === rows.length,\n} }];"
+      },
+      "id": "audit",
+      "name": "Count and reconcile",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        640
+      ]
+    }
+  ],
+  "connections": {
+    "Run example": {
+      "main": [
+        [
+          {
+            "node": "Fictional intake records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fictional intake records": {
+      "main": [
+        [
+          {
+            "node": "Validate and classify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate and classify": {
+      "main": [
+        [
+          {
+            "node": "Ready queue",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Review queue",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Duplicate log",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Count and reconcile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "tags": []
+}

@@ -1,0 +1,10 @@
+[
+  {"external_id":"001","full_name":" Maya Chen ","email":"maya@example.test","company":"Northside"},
+  {"external_id":"002","full_name":"Sam","email":"Sam@example.test","company":"Acorn"},
+  {"external_id":"001","full_name":"Maya Chen","email":"maya@example.test","company":"Northside"},
+  {"external_id":"003","full_name":"Ira","email":"","company":""},
+  {"external_id":"004","full_name":"Li","email":"li@@example.test","company":""},
+  {"external_id":"005","full_name":"Sara","email":"sara@EXAMPLE.TEST","company":""},
+  {"external_id":"002","full_name":"Sam","email":"Sam.New@example.test","company":"Acorn"},
+  {"external_id":"007","full_name":"Jo","email":"Jo@example.test","company":""}
+]

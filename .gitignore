@@ -1,0 +1,5 @@
+node_modules/
+.n8n/
+execution.json
+execution.log
+.DS_Store
