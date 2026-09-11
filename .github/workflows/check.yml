@@ -12,7 +12,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
-      N8N_USER_FOLDER: ${{ runner.temp }}/intake-n8n-user
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
       N8N_TEMPLATES_ENABLED: "false"
@@ -33,6 +32,7 @@ jobs:
         run: npm install --prefix "$RUNNER_TEMP/intake-n8n" --no-audit --no-fund n8n@2.38.7
       - name: Import and execute the workflow
         run: |
+          export N8N_USER_FOLDER="$RUNNER_TEMP/intake-n8n-user"
           "$RUNNER_TEMP/intake-n8n/node_modules/.bin/n8n" import:workflow --input=workflow.json
           "$RUNNER_TEMP/intake-n8n/node_modules/.bin/n8n" execute --id=IntakeDemo260911 --rawOutput > execution.log 2>&1
           node check-execution.cjs execution.log
