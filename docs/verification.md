@@ -10,7 +10,7 @@ With Node.js 24:
 npm test
 ```
 
-The six local tests exercise the classifier and its record handling. No package installation is needed.
+The original six local tests exercise the classifier and its record handling. Four companion tests exercise local SQLite persistence, process-restart replay, cross-batch duplicates/conflicts, transactional rollback/retry and batch-ID misuse. No package installation is needed. See the [persistence demo](persistence-demo.md) for the precise scope.
 
 `npm run build` regenerates `workflow.json` from the same classifier and example inputs.
 
