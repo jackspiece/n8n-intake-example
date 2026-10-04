@@ -7,7 +7,7 @@ An importable workflow that sorts records into **ready**, **review** and **dupli
   <img src="docs/assets/overview.png" alt="Seven-node n8n workflow: run the example, load eight fictional records, validate and classify, then produce three ready records, four review records, one duplicate and a reconciliation count." width="1280">
 </picture>
 
-**[Get the workflow JSON](workflow.json)** · **[Quick start](#quick-start)** · [Rules and data](docs/rules.md) · [Verification](docs/verification.md)
+**[Get the workflow JSON](workflow.json)** · **[Quick start](#quick-start)** · [Rules and data](docs/rules.md) · [Inspect saved batches](docs/inspection-guide.md) · [Verification](docs/verification.md)
 
 [![Verify intake workflow](https://github.com/jackspiece/n8n-intake-example/actions/workflows/check.yml/badge.svg)](https://github.com/jackspiece/n8n-intake-example/actions/workflows/check.yml)
 
@@ -41,6 +41,8 @@ IDs stay text. Surrounding whitespace is trimmed, and only the domain of an emai
 Matching IDs with identical normalized fields produce a duplicate record. Conflicting versions send the whole group to review. Unknown fields and malformed inputs are preserved for review.
 
 **Duplicate checks cover one run.** A live import would also need a persistent check against existing records. Read [the full rules and adaptation notes](docs/rules.md) before connecting a real source.
+
+The optional [local persistence and recovery demo](docs/persistence-demo.md) adds a SQLite destination around the same classifier. It demonstrates process-restart replay, cross-batch duplicates and rollback/retry with fictional data, while keeping the importable seven-node workflow unchanged. The [read-only inspector](docs/inspection-guide.md) lists saved batches and pages through their review reasons and duplicate references; full source values require `--details`. Use a stable, standalone rollback-journal database and read the guide’s privacy and file-safety limits.
 
 ## Work on it locally
 

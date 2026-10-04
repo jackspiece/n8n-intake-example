@@ -3,3 +3,8 @@ node_modules/
 execution.json
 execution.log
 .DS_Store
+demo-local/
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
