@@ -12,10 +12,20 @@ const MAX_LIMIT = 100;
 const MAX_RECORD_BYTES = 64 * 1024;
 const MAX_SUMMARY_BYTES = 16 * 1024;
 const MAX_REPORT_BYTES = 1024 * 1024;
+const MAX_REVIEW_BATCHES = 1000;
+const MAX_REVIEW_DECISIONS = 10000;
+// A fixed vocabulary keeps arbitrary stored strings out of the aggregate view.
+// These are reading labels only: the inspector never reruns the classifier.
+const REVIEW_REASONS = new Set([
+  "record_is_not_an_object", "missing_external_id", "missing_full_name", "missing_email",
+  "non_text_external_id", "non_text_full_name", "non_text_email", "non_text_company",
+  "email_format_needs_review", "unmapped_fields", "conflicting_id", "conflicts_with_persisted_record",
+]);
 const HELP = `Usage: node inspect-intake.cjs DATABASE [options]
 
 List committed batches, or inspect the saved decisions in one batch.
   --batch ID                 Inspect one batch (IDs are exact, case-sensitive)
+  --review-summary           Rank review reasons across all batches, or --batch
   --status ready|review|duplicate  Filter that batch's decisions
   --details                  Include original/normalized values and changes
   --limit N                  Page size, 1..100 (default 20)
@@ -45,7 +55,11 @@ function boundedInteger(value, fallback, minimum, maximum, name) {
   }
   return number;
 }
-function optionsFor({ batch, status, details = false, limit, offset } = {}) {
+function optionsFor({ batch, status, details = false, limit, offset, reviewSummary = false } = {}) {
+  if (typeof reviewSummary !== "boolean") fail("INVALID_OPTIONS", "reviewSummary must be a boolean.");
+  if (reviewSummary && (status !== undefined || details || limit !== undefined || offset !== undefined)) {
+    fail("INVALID_OPTIONS", "--review-summary cannot be combined with --status, --details, --limit, or --offset.");
+  }
   if (batch !== undefined && (typeof batch !== "string" || !batch.trim())) {
     fail("INVALID_OPTIONS", "batch must be a nonempty exact batch ID.");
   }
@@ -55,7 +69,7 @@ function optionsFor({ batch, status, details = false, limit, offset } = {}) {
   if (status !== undefined && batch === undefined) fail("INVALID_OPTIONS", "--status requires --batch.");
   if (typeof details !== "boolean") fail("INVALID_OPTIONS", "details must be a boolean.");
   if (details && batch === undefined) fail("INVALID_OPTIONS", "--details requires --batch.");
-  return { batch, status, details, limit: boundedInteger(limit, DEFAULT_LIMIT, 1, MAX_LIMIT, "limit"),
+  return { batch, status, details, reviewSummary, limit: boundedInteger(limit, DEFAULT_LIMIT, 1, MAX_LIMIT, "limit"),
     offset: boundedInteger(offset, 0, 0, Number.MAX_SAFE_INTEGER, "offset") };
 }
 function sidecarExists(file) {
@@ -194,6 +208,75 @@ function decisionFor(row, details) {
     ...(existingRecord === undefined ? {} : { existing_record: existingRecord }) };
 }
 
+function reviewSummaryFor(db, options) {
+  const scoped = options.batch !== undefined;
+  const parameters = scoped ? [options.batch] : [];
+  const batchWhere = scoped ? "WHERE id = ?" : "";
+  const batchCount = db.prepare(`SELECT COUNT(*) AS count FROM batches ${batchWhere}`).get(...parameters).count;
+  if (scoped && batchCount === 0) fail("BATCH_NOT_FOUND", "Batch not found. Use the batch index to find an exact committed ID.");
+  if (batchCount > MAX_REVIEW_BATCHES) {
+    fail("REVIEW_SUMMARY_LIMIT", "Review summaries support at most 1000 batches. Use --batch to inspect one committed batch; no partial summary was produced.");
+  }
+  // A global summary must not silently omit decisions without a committed batch.
+  if (!scoped && db.prepare(`SELECT 1 FROM decisions d WHERE NOT EXISTS
+    (SELECT 1 FROM batches b WHERE b.id = d.batch_id) LIMIT 1`).get()) {
+    incompatible("decision without a committed batch");
+  }
+  const observed = { input_count: 0, ready_count: 0, review_count: 0, duplicate_count: 0 };
+  let batchesWithReview = 0;
+  const batches = db.prepare(`SELECT id,
+    CASE WHEN length(CAST(summary AS BLOB)) <= ? THEN summary ELSE NULL END AS summary
+    FROM batches ${batchWhere} ORDER BY id COLLATE BINARY`).iterate(MAX_SUMMARY_BYTES, ...parameters);
+  for (const batch of batches) {
+    const counts = observedFor(db, batch.id, summaryFor(batch));
+    for (const key of Object.keys(observed)) {
+      observed[key] += counts[key];
+      if (!Number.isSafeInteger(observed[key])) incompatible("unsafe aggregate count");
+    }
+    if (counts.review_count > 0) batchesWithReview++;
+  }
+  if (observed.review_count > MAX_REVIEW_DECISIONS) {
+    fail("REVIEW_SUMMARY_LIMIT", "Review summaries support at most 10000 review decisions. Use --batch to narrow the scope if possible; no partial summary was produced.");
+  }
+  const reasons = new Map();
+  let withoutReasons = 0;
+  let withUnrecognizedReasons = 0;
+  let reviewed = 0;
+  const where = scoped ? "WHERE status = 'review' AND batch_id = ?" : "WHERE status = 'review'";
+  const rows = db.prepare(`SELECT batch_id, source_row, status,
+    CASE WHEN length(CAST(record AS BLOB)) <= ? THEN record ELSE NULL END AS record
+    FROM decisions ${where} ORDER BY batch_id COLLATE BINARY, source_row ASC`).iterate(MAX_RECORD_BYTES, ...parameters);
+  for (const row of rows) {
+    // Decode every review decision in scope, even when it has no known reasons.
+    // The normal validator also checks provenance; source values never enter the report.
+    const decision = decisionFor(row, false);
+    reviewed++;
+    if (decision.reasons.length === 0) withoutReasons++;
+    const hasUnknown = decision.reasons.some(reason => !REVIEW_REASONS.has(reason));
+    if (hasUnknown) withUnrecognizedReasons++;
+    const buckets = new Set(decision.reasons.map(reason => REVIEW_REASONS.has(reason) ? reason : "unrecognized_reason"));
+    for (const reason of buckets) {
+      let entry = reasons.get(reason);
+      if (!entry) {
+        entry = { reason, review_decision_count: 0, batch_count: 0, lastBatch: undefined };
+        reasons.set(reason, entry);
+      }
+      entry.review_decision_count++;
+      if (entry.lastBatch !== row.batch_id) { entry.batch_count++; entry.lastBatch = row.batch_id; }
+    }
+  }
+  if (reviewed !== observed.review_count) incompatible("unexpected review decision count");
+  const ranked = [...reasons.values()].map(({ lastBatch, ...entry }) => entry)
+    .sort((a, b) => b.review_decision_count - a.review_decision_count || (a.reason < b.reason ? -1 : a.reason > b.reason ? 1 : 0));
+  return { format_version: 1, view: "review_summary", scope: { batch_id: options.batch ?? null },
+    batch_count: batchCount, batches_with_review: batchesWithReview, observed_counts: observed,
+    integrity: { summary_matches_decisions: true, all_inputs_accounted_for: true },
+    review_decisions_without_reasons: withoutReasons,
+    review_decisions_with_unrecognized_reasons: withUnrecognizedReasons,
+    counting: "distinct_review_decisions_per_reason; reasons_can_overlap",
+    order: "review_decision_count_descending_then_reason_binary_ascending", reasons: ranked };
+}
+
 function inspectIntake(databaseFile, inputOptions = {}) {
   const options = optionsFor(inputOptions);
   const canonicalFile = checkFile(databaseFile);
@@ -203,7 +286,9 @@ function inspectIntake(databaseFile, inputOptions = {}) {
     db.exec("PRAGMA query_only = ON; PRAGMA busy_timeout = 1000; BEGIN;");
     validateSchema(db);
     let report;
-    if (options.batch === undefined) {
+    if (options.reviewSummary) {
+      report = reviewSummaryFor(db, options);
+    } else if (options.batch === undefined) {
       const total = db.prepare("SELECT COUNT(*) AS count FROM batches").get().count;
       const rows = db.prepare(`SELECT id, CASE WHEN length(CAST(summary AS BLOB)) <= ? THEN summary ELSE NULL END AS summary
         FROM batches ORDER BY id COLLATE BINARY LIMIT ? OFFSET ?`).all(MAX_SUMMARY_BYTES, options.limit, options.offset);
@@ -252,6 +337,22 @@ function renderHuman(report) {
   // JSON escaping keeps newlines, ANSI escape sequences, and other control
   // characters in stored user input from changing the terminal presentation.
   const value = input => JSON.stringify(input);
+  if (report.view === "review_summary") {
+    const count = report.observed_counts;
+    const lines = ["Review reason summary", report.scope.batch_id === null ? "Scope: all committed batches" : `Scope: batch ${value(report.scope.batch_id)}`,
+      `Batches: ${report.batch_count}; with review decisions: ${report.batches_with_review}`,
+      `Reconciled totals: ${count.input_count} input | ${count.ready_count} ready | ${count.review_count} review | ${count.duplicate_count} duplicate`,
+      "Counts are distinct review decisions per reason. Reasons overlap, so their counts are not a total."];
+    for (const reason of report.reasons) {
+      lines.push(`${value(reason.reason)}: ${reason.review_decision_count} review decision${reason.review_decision_count === 1 ? "" : "s"} in ${reason.batch_count} batch${reason.batch_count === 1 ? "" : "es"}`);
+    }
+    if (report.reasons.length === 0) lines.push("No review reason buckets in this scope.");
+    lines.push(`Review decisions without reasons: ${report.review_decisions_without_reasons}`,
+      `Review decisions with unrecognized reasons: ${report.review_decisions_with_unrecognized_reasons}`,
+      "Source values, row references, and unrecognized reason text are hidden.",
+      "These are saved review decisions, not a count of unresolved work. Inspection does not resolve or reclassify them.");
+    return lines.join("\n");
+  }
   const page = report.pagination;
   const lines = [report.view === "batches" ? "Committed intake batches" : `Batch ${value(report.batch_id)}`];
   if (report.view === "batches") {
@@ -285,11 +386,12 @@ function main(args) {
     const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
       batch: { type: "string" }, status: { type: "string" }, limit: { type: "string" },
       offset: { type: "string" }, details: { type: "boolean" }, json: { type: "boolean" }, help: { type: "boolean" },
+      "review-summary": { type: "boolean" },
     } });
     json = Boolean(values.json);
     if (values.help) { console.log(HELP); return; }
     if (positionals.length !== 1) fail("INVALID_OPTIONS", HELP);
-    const report = inspectIntake(positionals[0], values);
+    const report = inspectIntake(positionals[0], { ...values, reviewSummary: values["review-summary"] });
     console.log(json ? JSON.stringify(report, null, 2) : renderHuman(report));
   } catch (error) {
     const code = error instanceof InspectionError ? error.code : "INVALID_OPTIONS";

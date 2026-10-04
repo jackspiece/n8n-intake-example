@@ -30,11 +30,14 @@ The first batch shows **3 ready, 4 review, and 1 duplicate**. The second has **0
 
 No command above resolves a review decision or changes an accepted record. The reviewer can compare the saved values and then choose a separate, authorized next step.
 
+To prioritize recurring cleanup causes across these batches, use `node inspect-intake.cjs demo-local/inspect.sqlite --review-summary`. The [review-summary guide](review-summary.md) explains the distinct-decision counts, scope, privacy, and bounded scan. This aggregate mode does not show source values or row references.
+
 ## Commands and output
 
 ```text
 node inspect-intake.cjs DATABASE [--batch ID] [--status ready|review|duplicate]
     [--details] [--limit N] [--offset N] [--json]
+node inspect-intake.cjs DATABASE --review-summary [--batch ID] [--json]
 ```
 
 - With no `--batch`, the index lists committed batch IDs and saved counters. IDs sort in SQLite binary ascending order, not by date or insertion order.
@@ -47,6 +50,7 @@ node inspect-intake.cjs DATABASE [--batch ID] [--status ready|review|duplicate]
 - The explanation is a reading aid derived from the saved status. Reason codes, normalized values, and provenance come from the persisted decision; inspection does not recompute classification.
 - `--json` emits one deterministic JSON report to standard output. It includes `format_version: 1`, a view name, filters where applicable, sort order, and pagination. There are no timestamps or machine-specific paths. Successful empty pages are valid JSON reports with an empty results array.
 - Human output JSON-escapes stored strings, including control characters, so a stored newline or ANSI escape cannot rewrite the terminal display.
+- `--review-summary` selects an aggregate view instead of the paginated index or decisions view. It accepts an optional exact `--batch` and `--json`, but rejects status, detail, and pagination options. Its scope is complete or the command fails; there is no sampled or partial summary.
 
 ### Example filtered JSON fields
 
@@ -82,7 +86,7 @@ Before reading the file header, it resolves file and directory symlinks to a can
 
 Use a quiescent, standalone database produced by this companion's default rollback-journal mode. **WAL databases and files with journal/sidecar files are rejected before SQLite is opened.** SQLite read-only WAL connections can create sidecars; opening an immutable main file could instead omit uncheckpointed commits. The inspector does neither. Ask the database owner for a consistent standalone SQLite snapshot in DELETE journal mode. Do not copy only the main file of a live WAL database or delete sidecars to bypass the check. No recovery or checkpoint operation is performed by inspection.
 
-The three expected tables and their required column types must exist. Returned batches' counters must reconcile with the stored decisions, including when using a status filter. Selected decision payloads and provenance are checked before display. Schema incompatibility, malformed selected JSON, unknown status, and inconsistent counters fail explicitly. This is not a full-database corruption audit: unselected batch contents and decisions outside the selected page are not fully decoded or validated.
+The three expected tables and their required column types must exist. Returned batches' counters must reconcile with the stored decisions, including when using a status filter. Selected decision payloads and provenance are checked before display. Schema incompatibility, malformed selected JSON, unknown status, and inconsistent counters fail explicitly. This is not a full-database corruption audit: the paginated views do not fully decode unselected batch contents or decisions outside the selected page. Review summaries reconcile every batch and validate every review payload in their scope, but do not decode ready/duplicate payloads or audit accepted-record contents.
 
 Pagination is deterministic for unchanged data. Separate commands are separate snapshots; inserting or changing batches between calls can move index offsets. Inspect a fixed snapshot when paging through an audit.
 
@@ -94,7 +98,7 @@ Besides the 100-row page maximum, a stored decision is limited to 64 KiB, a stor
 
 - Exit **0**: a complete report, including empty pages, or `--help`.
 - Exit **2**: invalid arguments, status, page size, or offset (`INVALID_OPTIONS`).
-- Exit **1**: database or report error. Codes include `DATABASE_NOT_FOUND`, `DATABASE_UNREADABLE`, `DATABASE_BUSY`, `BATCH_NOT_FOUND`, `INCOMPATIBLE_DATABASE`, `INCONSISTENT_COUNTS`, `UNSUPPORTED_JOURNAL_MODE`, `DATABASE_SIDECARS`, and `OUTPUT_LIMIT`.
+- Exit **1**: database or report error. Codes include `DATABASE_NOT_FOUND`, `DATABASE_UNREADABLE`, `DATABASE_BUSY`, `BATCH_NOT_FOUND`, `INCOMPATIBLE_DATABASE`, `INCONSISTENT_COUNTS`, `UNSUPPORTED_JOURNAL_MODE`, `DATABASE_SIDECARS`, `OUTPUT_LIMIT`, and `REVIEW_SUMMARY_LIMIT`.
 
 Errors go to standard error; standard output stays empty. With `--json`, the inspector's error is `{"error":{"code":"…","message":"…"}}`. Error messages do not quote stored source values or raw SQLite errors. Node itself may emit runtime diagnostics to standard error on versions where its SQLite API is experimental.
 
@@ -107,6 +111,6 @@ npm test
 npm run build
 ```
 
-The inspection tests verify first- and later-batch counters/provenance, default value hiding, explicit detail fidelity, stable filters/pages, empty states, deterministic JSON, SQL parameterization, escaped terminal controls, size bounds, precise errors, and WAL/sidecar refusal. Privacy regressions reject unexpected or malformed reference fields without exposing their values in human or JSON errors, with or without details. POSIX subprocess fixtures bound FIFO and deterministic stat/open replacement checks to two seconds; a timeout is a test failure, not a successful rejection. The tests also check descriptor cleanup, stable regular-file symlinks, and target-sidecar refusal through file and directory aliases, and conservative rejection of dangling sidecar links. They compare closed database bytes, schema, every table's rows, and directory entries before and after API and CLI inspection, including a read-only file. The full suite has 36 tests, including the unchanged classifier, replay, conflict, and injected rollback tests. Build output must remain byte-identical to the original `workflow.json`; the inspector adds no workflow nodes.
+The inspection tests verify first- and later-batch counters/provenance, default value hiding, explicit detail fidelity, stable filters/pages, empty states, deterministic JSON, SQL parameterization, escaped terminal controls, size bounds, precise errors, and WAL/sidecar refusal. Privacy regressions reject unexpected or malformed reference fields without exposing their values in human or JSON errors, with or without details. POSIX subprocess fixtures bound FIFO and deterministic stat/open replacement checks to two seconds; a timeout is a test failure, not a successful rejection. The tests also check descriptor cleanup, stable regular-file symlinks, and target-sidecar refusal through file and directory aliases, and conservative rejection of dangling sidecar links. They compare closed database bytes, schema, every table's rows, and directory entries before and after API and CLI inspection, including a read-only file. Review-summary tests additionally cover complete-scope denominators, overlapping/deduplicated reasons, unknown reasons without text exposure, exact scan boundaries, and aggregate read-only behavior. The full suite has 51 tests, including the unchanged classifier, replay, conflict, and injected rollback tests. Build output must remain byte-identical to the original `workflow.json`; the inspector adds no workflow nodes.
 
 The actual n8n runtime check remains a separate baseline described in [Verification](verification.md). The inspector tests do not claim to execute n8n.

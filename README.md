@@ -44,6 +44,8 @@ Matching IDs with identical normalized fields produce a duplicate record. Confli
 
 The optional [local persistence and recovery demo](docs/persistence-demo.md) adds a SQLite destination around the same classifier. It demonstrates process-restart replay, cross-batch duplicates and rollback/retry with fictional data, while keeping the importable seven-node workflow unchanged. The [read-only inspector](docs/inspection-guide.md) lists saved batches and pages through their review reasons and duplicate references; full source values require `--details`. Use a stable, standalone rollback-journal database and read the guide’s privacy and file-safety limits.
 
+The [review-reason summary](docs/review-summary.md) ranks recurring cleanup reasons across committed batches or within one batch, without displaying source values or changing saved decisions.
+
 ## Work on it locally
 
 The classifier tests use Node.js 24's built-in runner and need no packages:

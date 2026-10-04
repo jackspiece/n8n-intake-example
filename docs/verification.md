@@ -12,6 +12,8 @@ npm test
 
 The original six local tests exercise the classifier and its record handling. Four companion tests exercise local SQLite persistence, process-restart replay, cross-batch duplicates/conflicts, transactional rollback/retry and batch-ID misuse. No package installation is needed. See the [persistence demo](persistence-demo.md) for the precise scope.
 
+Twenty-six [inspection tests](inspection-guide.md) verify saved decisions, pagination, privacy boundaries, read-only file/alias handling, and error behavior. Fifteen [review-summary tests](review-summary.md) verify complete-scope aggregation, overlapping reason counts, unknown-reason privacy, scan limits, and unchanged database bytes/schema/rows/sidecars. The local suite totals **51 tests**. These companion tests do not execute n8n.
+
 `npm run build` regenerates `workflow.json` from the same classifier and example inputs.
 
 ## Actual n8n execution
